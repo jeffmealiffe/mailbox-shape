@@ -9,10 +9,11 @@ from dotenv import load_dotenv
 from rich.console import Console
 from rich.table import Table
 
+from .analyzers import attachments as attachments_mod
 from .analyzers import folders as folders_mod
+from .analyzers import message_types as types_mod
 from .analyzers import people as people_mod
 from .analyzers import read_ratio as read_mod
-from .analyzers import shape as shape_mod
 from .analyzers import sizes as sizes_mod
 from .analyzers import volume as volume_mod
 from .auth import get_access_token
@@ -184,34 +185,48 @@ def senders(top_n: int) -> None:
     console.print(table)
 
 
-@main.command()
+@main.command("attachment-ratio")
 @click.option("--root", default="inbox", show_default=True,
               help="Well-known folder to scope to. Use 'msgfolderroot' for the whole mailbox.")
-def shape(root: str) -> None:
-    """Per-folder attachment share and item-type breakdown.
-
-    The 'types' column shows non-default item types (meeting requests, etc.)
-    that mix in with plain messages. Folders that are 100% plain mail show '—'.
-    """
+def attachment_ratio(root: str) -> None:
+    """Per-folder share of messages with attachments."""
     with _client() as c, console.status(f"Walking '{root}' subtree..."):
-        result = shape_mod.shape_by_folder(c, root)
+        result = attachments_mod.attachments_by_folder(c, root)
     rows = sorted(result.items(), key=lambda kv: kv[1].total, reverse=True)
-    table = Table(title=f"Item shape by folder ({root} + subfolders)")
+    table = Table(title=f"Attachment ratio by folder ({root} + subfolders)")
     table.add_column("folder")
     table.add_column("total", justify="right")
     table.add_column("w/ attach", justify="right")
-    table.add_column("% attach", justify="right")
-    table.add_column("non-message types")
+    table.add_column("% w/ attach", justify="right")
     for name, s in rows:
-        non_msg = [(t, n) for t, n in s.type_counts.most_common() if t != "message"]
-        type_str = ", ".join(f"{t}: {n:,}" for t, n in non_msg) or "—"
-        table.add_row(
-            name,
-            f"{s.total:,}",
-            f"{s.with_attachments:,}",
-            f"{s.attachment_pct:.0f}%",
-            type_str,
-        )
+        table.add_row(name, f"{s.total:,}", f"{s.with_attachments:,}", f"{s.ratio * 100:.0f}%")
+    console.print(table)
+
+
+@main.command("message-types")
+@click.option("--root", default="inbox", show_default=True,
+              help="Well-known folder to scope to. Use 'msgfolderroot' for the whole mailbox.")
+def message_types(root: str) -> None:
+    """Per-folder item-type distribution.
+
+    Folders that are 100% plain mail show '—' in the non-message-types
+    column — Graph only annotates @odata.type on subtypes like
+    eventMessage, so absent annotation means a plain mail message.
+    """
+    with _client() as c, console.status(f"Walking '{root}' subtree..."):
+        result = types_mod.message_types_by_folder(c, root)
+    rows = sorted(result.items(), key=lambda kv: sum(kv[1].values()), reverse=True)
+    table = Table(title=f"Message types by folder ({root} + subfolders)")
+    table.add_column("folder")
+    table.add_column("total", justify="right")
+    table.add_column("message", justify="right")
+    table.add_column("non-message types")
+    for name, counts in rows:
+        total = sum(counts.values())
+        msg_count = counts.get("message", 0)
+        non_msg = [(t, n) for t, n in counts.most_common() if t != "message"]
+        non_msg_str = ", ".join(f"{t}: {n:,}" for t, n in non_msg) or "—"
+        table.add_row(name, f"{total:,}", f"{msg_count:,}", non_msg_str)
     console.print(table)
 
 
