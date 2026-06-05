@@ -1,6 +1,9 @@
 """mailbox-shape command-line interface."""
 from __future__ import annotations
 
+import base64
+import json
+
 import click
 from dotenv import load_dotenv
 from rich.console import Console
@@ -16,9 +19,26 @@ from .graph import GraphClient
 load_dotenv()
 console = Console()
 
+# Microsoft's well-known "consumer / MSA" tenant id. If a token's `tid` claim
+# matches this, the account is a personal Microsoft account regardless of which
+# email it shows.
+MSA_TENANT_ID = "9188040d-6c67-4c5b-b112-36a304b66dad"
+
 
 def _client() -> GraphClient:
     return GraphClient(get_access_token())
+
+
+def _decode_token_claims(token: str) -> dict:
+    """Decode the JWT payload without verifying — diagnostic only."""
+    parts = token.split(".")
+    if len(parts) < 2:
+        return {}
+    pad = "=" * (-len(parts[1]) % 4)
+    try:
+        return json.loads(base64.urlsafe_b64decode(parts[1] + pad))
+    except Exception:
+        return {}
 
 
 @click.group()
@@ -27,16 +47,50 @@ def main() -> None:
 
 
 @main.command()
-def folders() -> None:
-    """Print folder tree with item counts and sizes."""
+def whoami() -> None:
+    """Print the account / tenant the cached token is bound to."""
+    token = get_access_token()
+    claims = _decode_token_claims(token)
+    tid = claims.get("tid", "?")
+    account_kind = "personal Microsoft account (consumer)" if tid == MSA_TENANT_ID else "work/school (Entra ID)"
+
+    table = Table(title="Cached token identity")
+    table.add_column("field")
+    table.add_column("value")
+    table.add_row("account kind", account_kind)
+    table.add_row("tenant id (tid claim)", tid)
+    table.add_row("upn claim", claims.get("upn", claims.get("preferred_username", "(none)")))
+    table.add_row("name claim", claims.get("name", "(none)"))
+    table.add_row("scopes (scp claim)", claims.get("scp", "(none)"))
+
+    with GraphClient(token) as c:
+        try:
+            me = c.get("/me")
+            table.add_row("/me userPrincipalName", me.get("userPrincipalName", "(none)"))
+            table.add_row("/me mail", me.get("mail", "(none)"))
+        except Exception as e:
+            table.add_row("/me", f"[red]{e}[/]")
+    console.print(table)
+
+
+@main.command()
+@click.option("--with-sizes", is_flag=True, help="Sum per-message sizes to compute folder size (slow on large mailboxes).")
+def folders(with_sizes: bool) -> None:
+    """Print folder tree with item counts (and optionally sizes)."""
     with _client() as c:
         tree = folders_mod.walk_folders(c)
+        if with_sizes:
+            with console.status("Computing folder sizes..."):
+                folders_mod.populate_sizes(c, tree)
 
     def render(nodes: list[folders_mod.FolderNode], depth: int = 0) -> None:
         for n in nodes:
             indent = "  " * depth
-            size = f"{n.size_in_bytes / (1024 * 1024):,.1f} MB" if n.size_in_bytes is not None else "size n/a"
-            console.print(f"{indent}{n.display_name}  [dim]{n.total_item_count} items, {size}[/]")
+            if n.size_in_bytes is None:
+                tail = f"{n.total_item_count} items"
+            else:
+                tail = f"{n.total_item_count} items, {n.size_in_bytes / (1024 * 1024):,.1f} MB"
+            console.print(f"{indent}{n.display_name}  [dim]{tail}[/]")
             render(n.children, depth + 1)
 
     render(tree)

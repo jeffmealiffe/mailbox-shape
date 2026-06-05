@@ -13,52 +13,60 @@ class FolderNode:
     parent_id: str | None
     total_item_count: int
     unread_item_count: int
-    # sizeInBytes is only present on work/school mailboxes — None on consumer.
+    # Graph does not expose folder size as a property. Populated only when the
+    # caller explicitly asks for it via compute_sizes — that walks all messages
+    # in the folder and sums their `size` field.
     size_in_bytes: int | None
     children: list["FolderNode"] = field(default_factory=list)
 
 
-# Base fields, available on both consumer and work/school mailboxes.
-_BASE_SELECT = "id,displayName,parentFolderId,totalItemCount,unreadItemCount"
+_SELECT = "id,displayName,parentFolderId,totalItemCount,unreadItemCount"
 
 
 def walk_folders(client: GraphClient) -> list[FolderNode]:
-    """Return top-level folders with children populated recursively.
-
-    Tries to include sizeInBytes (work/school accounts only). Falls back to the
-    base selection if Graph rejects it — consumer (personal) mailboxes do not
-    have sizeInBytes on the mailFolder resource.
-    """
-    select = _select_for(client)
+    """Return top-level folders with children populated recursively."""
 
     def fetch(parent: str | None) -> list[FolderNode]:
         path = "/me/mailFolders" if parent is None else f"/me/mailFolders/{parent}/childFolders"
         nodes: list[FolderNode] = []
-        for item in client.paged(path, **{"$select": select, "$top": 100, "includeHiddenFolders": "true"}):
-            node = FolderNode(
-                id=item["id"],
-                display_name=item.get("displayName", ""),
-                parent_id=item.get("parentFolderId"),
-                total_item_count=item.get("totalItemCount", 0),
-                unread_item_count=item.get("unreadItemCount", 0),
-                size_in_bytes=item.get("sizeInBytes"),
+        for item in client.paged(path, **{"$select": _SELECT, "$top": 100, "includeHiddenFolders": "true"}):
+            nodes.append(
+                FolderNode(
+                    id=item["id"],
+                    display_name=item.get("displayName", ""),
+                    parent_id=item.get("parentFolderId"),
+                    total_item_count=item.get("totalItemCount", 0),
+                    unread_item_count=item.get("unreadItemCount", 0),
+                    size_in_bytes=None,
+                    children=fetch(item["id"]),
+                )
             )
-            node.children = fetch(node.id)
-            nodes.append(node)
         return nodes
 
     return fetch(None)
 
 
-def _select_for(client: GraphClient) -> str:
-    """Probe whether sizeInBytes is selectable; cache the answer on the client."""
-    cached = getattr(client, "_folders_select", None)
-    if cached:
-        return cached
-    try:
-        client.get("/me/mailFolders", **{"$select": _BASE_SELECT + ",sizeInBytes", "$top": 1})
-        select = _BASE_SELECT + ",sizeInBytes"
-    except Exception:
-        select = _BASE_SELECT
-    client._folders_select = select  # type: ignore[attr-defined]
-    return select
+def compute_size(client: GraphClient, folder_id: str) -> int:
+    """Sum the `size` field of every message directly in this folder.
+
+    Does NOT include child folders — callers must recurse.
+    """
+    total = 0
+    for msg in client.paged(
+        f"/me/mailFolders/{folder_id}/messages",
+        **{"$select": "id,size", "$top": 999},
+    ):
+        size = msg.get("size")
+        if isinstance(size, int):
+            total += size
+    return total
+
+
+def populate_sizes(client: GraphClient, nodes: list[FolderNode]) -> None:
+    """Walk the tree and fill in size_in_bytes for every node, in place."""
+    for n in nodes:
+        if n.total_item_count > 0:
+            n.size_in_bytes = compute_size(client, n.id)
+        else:
+            n.size_in_bytes = 0
+        populate_sizes(client, n.children)
