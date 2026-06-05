@@ -35,8 +35,8 @@ def folders() -> None:
     def render(nodes: list[folders_mod.FolderNode], depth: int = 0) -> None:
         for n in nodes:
             indent = "  " * depth
-            mb = n.size_in_bytes / (1024 * 1024)
-            console.print(f"{indent}{n.display_name}  [dim]{n.total_item_count} items, {mb:,.1f} MB[/]")
+            size = f"{n.size_in_bytes / (1024 * 1024):,.1f} MB" if n.size_in_bytes is not None else "size n/a"
+            console.print(f"{indent}{n.display_name}  [dim]{n.total_item_count} items, {size}[/]")
             render(n.children, depth + 1)
 
     render(tree)
