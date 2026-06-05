@@ -74,14 +74,10 @@ def whoami() -> None:
 
 
 @main.command()
-@click.option("--with-sizes", is_flag=True, help="Sum per-message sizes to compute folder size (slow on large mailboxes).")
-def folders(with_sizes: bool) -> None:
-    """Print folder tree with item counts (and optionally sizes)."""
+def folders() -> None:
+    """Print folder tree with item counts and sizes."""
     with _client() as c:
         tree = folders_mod.walk_folders(c)
-        if with_sizes:
-            with console.status("Computing folder sizes..."):
-                folders_mod.populate_sizes(c, tree)
 
     def render(nodes: list[folders_mod.FolderNode], depth: int = 0) -> None:
         for n in nodes:

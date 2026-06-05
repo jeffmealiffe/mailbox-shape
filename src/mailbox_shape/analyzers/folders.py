@@ -5,6 +5,14 @@ from dataclasses import dataclass, field
 
 from ..graph import GraphClient
 
+# microsoft.graph.message / mailFolder have no schema-declared size property.
+# Both surface via the MAPI extended property at ID 0x0E08:
+#   - On a message: PR_MESSAGE_SIZE        (type PT_LONG  → "Integer 0x0E08")
+#   - On a folder:  PR_MESSAGE_SIZE_EXTENDED (type PT_I8 → "Long 0x0E08")
+# The folder variant is 64-bit so totals beyond 2 GB don't overflow.
+PR_MESSAGE_SIZE = "Integer 0x0E08"
+PR_MESSAGE_SIZE_EXTENDED = "Long 0x0E08"
+
 
 @dataclass
 class FolderNode:
@@ -13,48 +21,13 @@ class FolderNode:
     parent_id: str | None
     total_item_count: int
     unread_item_count: int
-    # Graph does not expose folder size as a property. Populated only when the
-    # caller explicitly asks for it via compute_sizes — that walks all messages
-    # in the folder and sums their `size` field.
     size_in_bytes: int | None
     children: list["FolderNode"] = field(default_factory=list)
 
 
-_SELECT = "id,displayName,parentFolderId,totalItemCount,unreadItemCount"
-
-
-def walk_folders(client: GraphClient) -> list[FolderNode]:
-    """Return top-level folders with children populated recursively."""
-
-    def fetch(parent: str | None) -> list[FolderNode]:
-        path = "/me/mailFolders" if parent is None else f"/me/mailFolders/{parent}/childFolders"
-        nodes: list[FolderNode] = []
-        for item in client.paged(path, **{"$select": _SELECT, "$top": 100, "includeHiddenFolders": "true"}):
-            nodes.append(
-                FolderNode(
-                    id=item["id"],
-                    display_name=item.get("displayName", ""),
-                    parent_id=item.get("parentFolderId"),
-                    total_item_count=item.get("totalItemCount", 0),
-                    unread_item_count=item.get("unreadItemCount", 0),
-                    size_in_bytes=None,
-                    children=fetch(item["id"]),
-                )
-            )
-        return nodes
-
-    return fetch(None)
-
-
-# microsoft.graph.message has no schema-declared `size` — $select=size fails.
-# Read the MAPI property PR_MESSAGE_SIZE (tag 0x0E08, type Integer) instead.
-PR_MESSAGE_SIZE = "Integer 0x0E08"
-
-
-def _msg_size(msg: dict) -> int | None:
-    """Pull the PR_MESSAGE_SIZE value out of an expanded singleValueExtendedProperties."""
-    for prop in msg.get("singleValueExtendedProperties", []) or []:
-        if prop.get("id") == PR_MESSAGE_SIZE:
+def _ext_value(item: dict, prop_id: str) -> int | None:
+    for prop in item.get("singleValueExtendedProperties", []) or []:
+        if prop.get("id") == prop_id:
             try:
                 return int(prop.get("value", 0))
             except (TypeError, ValueError):
@@ -62,29 +35,41 @@ def _msg_size(msg: dict) -> int | None:
     return None
 
 
-def compute_size(client: GraphClient, folder_id: str) -> int:
-    """Sum the size of every message directly in this folder.
+def _msg_size(msg: dict) -> int | None:
+    return _ext_value(msg, PR_MESSAGE_SIZE)
 
-    Does NOT include child folders — callers must recurse.
+
+_SELECT = "id,displayName,parentFolderId,totalItemCount,unreadItemCount"
+
+
+def walk_folders(client: GraphClient) -> list[FolderNode]:
+    """Return top-level folders with children populated recursively.
+
+    Folder size comes from PR_MESSAGE_SIZE_EXTENDED, expanded inline — one
+    extended property per folder, one round-trip per page (not per message).
     """
-    total = 0
     params = {
-        "$select": "id",
-        "$expand": f"singleValueExtendedProperties($filter=id eq '{PR_MESSAGE_SIZE}')",
-        "$top": 999,
+        "$select": _SELECT,
+        "$expand": f"singleValueExtendedProperties($filter=id eq '{PR_MESSAGE_SIZE_EXTENDED}')",
+        "$top": 100,
+        "includeHiddenFolders": "true",
     }
-    for msg in client.paged(f"/me/mailFolders/{folder_id}/messages", **params):
-        s = _msg_size(msg)
-        if s is not None:
-            total += s
-    return total
 
+    def fetch(parent: str | None) -> list[FolderNode]:
+        path = "/me/mailFolders" if parent is None else f"/me/mailFolders/{parent}/childFolders"
+        nodes: list[FolderNode] = []
+        for item in client.paged(path, **params):
+            nodes.append(
+                FolderNode(
+                    id=item["id"],
+                    display_name=item.get("displayName", ""),
+                    parent_id=item.get("parentFolderId"),
+                    total_item_count=item.get("totalItemCount", 0),
+                    unread_item_count=item.get("unreadItemCount", 0),
+                    size_in_bytes=_ext_value(item, PR_MESSAGE_SIZE_EXTENDED),
+                    children=fetch(item["id"]),
+                )
+            )
+        return nodes
 
-def populate_sizes(client: GraphClient, nodes: list[FolderNode]) -> None:
-    """Walk the tree and fill in size_in_bytes for every node, in place."""
-    for n in nodes:
-        if n.total_item_count > 0:
-            n.size_in_bytes = compute_size(client, n.id)
-        else:
-            n.size_in_bytes = 0
-        populate_sizes(client, n.children)
+    return fetch(None)
