@@ -122,11 +122,14 @@ def folders(show_own: bool) -> None:
 
 
 @main.command()
-def sizes() -> None:
+@click.option("--limit", type=int, default=sizes_mod.DEFAULT_SAMPLE, show_default=True,
+              help="Sample size per direction. Use 0 for no cap (may take a long time).")
+def sizes(limit: int) -> None:
     """Print message size percentiles for sent and received."""
-    with _client() as c:
-        result = sizes_mod.size_percentiles(c)
-    table = Table(title="Message size (bytes)")
+    cap = None if limit == 0 else limit
+    with _client() as c, console.status(f"Sampling up to {limit or 'all'} messages per direction..."):
+        result = sizes_mod.size_percentiles(c, cap)
+    table = Table(title=f"Message size (bytes), newest {cap or 'all'} per direction")
     table.add_column("direction")
     for p in sizes_mod.PERCENTILES:
         table.add_column(f"p{p}", justify="right")
