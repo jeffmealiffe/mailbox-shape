@@ -10,6 +10,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .analyzers import folders as folders_mod
+from .analyzers import people as people_mod
 from .analyzers import read_ratio as read_mod
 from .analyzers import sizes as sizes_mod
 from .analyzers import volume as volume_mod
@@ -152,19 +153,47 @@ def sizes(limit: int) -> None:
 
 
 @main.command("read-ratio")
-@click.option("--folder", default="inbox", help="Well-known folder name or id (default: inbox).")
-def read_ratio(folder: str) -> None:
-    """Print read-vs-ignored share by sender domain."""
-    with _client() as c:
-        result = read_mod.read_ratio_by_sender_domain(c, folder)
+@click.option("--top", "top_n", type=int, default=50, show_default=True, help="Number of domains to show.")
+def read_ratio(top_n: int) -> None:
+    """Print read-vs-ignored share by sender domain across the Inbox subtree."""
+    with _client() as c, console.status("Walking Inbox subtree..."):
+        result = read_mod.read_ratio_by_sender_domain(c)
     rows = sorted(result.items(), key=lambda kv: kv[1].total, reverse=True)
-    table = Table(title=f"Read ratio by sender domain — {folder}")
+    table = Table(title="Read ratio by sender domain (Inbox + subfolders)")
     table.add_column("domain")
     table.add_column("total", justify="right")
     table.add_column("read", justify="right")
     table.add_column("% read", justify="right")
-    for domain, stats in rows[:50]:
-        table.add_row(domain, str(stats.total), str(stats.read), f"{stats.read_ratio * 100:.0f}%")
+    for domain, stats in rows[:top_n]:
+        table.add_row(domain, f"{stats.total:,}", f"{stats.read:,}", f"{stats.read_ratio * 100:.0f}%")
+    console.print(table)
+
+
+@main.command()
+@click.option("--top", "top_n", type=int, default=20, show_default=True)
+def senders(top_n: int) -> None:
+    """Top sender addresses across the Inbox subtree."""
+    with _client() as c, console.status("Counting senders..."):
+        rows = people_mod.top_senders(c, top_n)
+    table = Table(title=f"Top {top_n} sender addresses (Inbox + subfolders)")
+    table.add_column("address")
+    table.add_column("count", justify="right")
+    for addr, n in rows:
+        table.add_row(addr, f"{n:,}")
+    console.print(table)
+
+
+@main.command()
+@click.option("--top", "top_n", type=int, default=20, show_default=True)
+def recipients(top_n: int) -> None:
+    """Top recipient addresses across Sent Items (To + Cc)."""
+    with _client() as c, console.status("Counting recipients..."):
+        rows = people_mod.top_recipients(c, top_n)
+    table = Table(title=f"Top {top_n} recipient addresses (Sent Items, To + Cc)")
+    table.add_column("address")
+    table.add_column("count", justify="right")
+    for addr, n in rows:
+        table.add_row(addr, f"{n:,}")
     console.print(table)
 
 
