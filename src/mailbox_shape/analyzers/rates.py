@@ -1,4 +1,4 @@
-"""Per-day / per-weekday / per-working-hour rates over a recent time window."""
+"""Per-day timeline of message rates, normalized to working hours."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -12,47 +12,57 @@ from ..graph import GraphClient
 
 
 @dataclass
-class Counts:
-    total: int = 0
-    weekday: int = 0  # received on Mon-Fri (any hour)
-    weekend: int = 0  # received on Sat-Sun (any hour)
-    working: int = 0  # received Mon-Fri inside [work_start, work_end)
+class DayCounts:
+    # `*_working` are the subset of the same-named count received/sent during
+    # configured working hours of a weekday.
+    sent: int = 0
+    sent_working: int = 0
+    received: int = 0
+    received_working: int = 0
+    filed: int = 0
+    filed_working: int = 0
+
+    def add(self, other: "DayCounts") -> None:
+        self.sent += other.sent
+        self.sent_working += other.sent_working
+        self.received += other.received
+        self.received_working += other.received_working
+        self.filed += other.filed
+        self.filed_working += other.filed_working
 
 
 @dataclass
-class WindowRates:
+class TimeWindow:
     days: int
-    weekdays: int
-    weekend_days: int
-    working_hours: int
     work_start: int
     work_end: int
     tz: str
-    sent: Counts = field(default_factory=Counts)
-    received: Counts = field(default_factory=Counts)
-    filed: Counts = field(default_factory=Counts)  # subset of received: messages outside Inbox root
+    daily: dict[date, DayCounts] = field(default_factory=dict)
+
+    @property
+    def hours_per_workday(self) -> int:
+        return self.work_end - self.work_start
+
+    @property
+    def weekdays(self) -> int:
+        return sum(1 for d in self.daily if d.weekday() < 5)
+
+    @property
+    def total_working_hours(self) -> int:
+        return self.weekdays * self.hours_per_workday
+
+    def aggregate(self) -> DayCounts:
+        agg = DayCounts()
+        for c in self.daily.values():
+            agg.add(c)
+        return agg
 
 
 def _iso_z(ts: datetime) -> str:
-    """ISO 8601 with trailing Z — Graph's preferred date-time literal."""
     return ts.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def _denominators(now_local: datetime, days: int, work_start: int, work_end: int) -> tuple[int, int, int]:
-    """Count weekdays, weekend days, and working hours in the last `days` window."""
-    weekdays = 0
-    weekend_days = 0
-    today: date = now_local.date()
-    for offset in range(days):
-        d = today - timedelta(days=offset)
-        if d.weekday() < 5:
-            weekdays += 1
-        else:
-            weekend_days += 1
-    return weekdays, weekend_days, weekdays * (work_end - work_start)
-
-
-def _accumulate(
+def _scan(
     client: GraphClient,
     folder_id: str,
     ts_field: str,
@@ -60,7 +70,8 @@ def _accumulate(
     tzinfo: ZoneInfo,
     work_start: int,
     work_end: int,
-    bucket: Counts,
+    window: TimeWindow,
+    series: str,  # 'sent', 'received', or 'filed'
 ) -> None:
     params = {
         "$select": f"id,{ts_field}",
@@ -72,58 +83,63 @@ def _accumulate(
         if not raw:
             continue
         local = dateparser.isoparse(raw).astimezone(tzinfo)
-        bucket.total += 1
-        if local.weekday() < 5:
-            bucket.weekday += 1
-            if work_start <= local.hour < work_end:
-                bucket.working += 1
-        else:
-            bucket.weekend += 1
+        d = local.date()
+        if d not in window.daily:
+            continue  # boundary slop — Graph may include a stray msg just outside the window
+        bucket = window.daily[d]
+        in_work_hours = local.weekday() < 5 and work_start <= local.hour < work_end
+        if series == "sent":
+            bucket.sent += 1
+            if in_work_hours:
+                bucket.sent_working += 1
+        elif series == "received":
+            bucket.received += 1
+            if in_work_hours:
+                bucket.received_working += 1
+        else:  # filed
+            bucket.filed += 1
+            if in_work_hours:
+                bucket.filed_working += 1
 
 
-def compute_rates(
+def compute_daily_rates(
     client: GraphClient,
     days: int = 30,
     work_start: int = 9,
     work_end: int = 17,
     tz: str = "America/Los_Angeles",
-) -> WindowRates:
+) -> TimeWindow:
+    """Per-day counts for the last `days` days, in `tz`.
+
+    For each day we track: total sent / received / filed, and the subset of
+    each that landed inside [work_start, work_end) on a weekday. 'filed' is
+    the subset of received that came in to an Inbox subfolder rather than
+    Inbox root.
+
+    Implementation uses Graph $filter on the timestamp field to scope each
+    folder fetch to the window — fast even on a huge mailbox.
+    """
     if not 0 <= work_start < work_end <= 24:
         raise ValueError(f"Invalid work hours: {work_start}–{work_end}")
+
     tzinfo = ZoneInfo(tz)
     now_local = datetime.now(tzinfo)
     since = (now_local - timedelta(days=days)).astimezone(timezone.utc)
     since_iso_z = _iso_z(since)
 
-    weekdays, weekend_days, working_hours = _denominators(now_local, days, work_start, work_end)
-    result = WindowRates(
-        days=days,
-        weekdays=weekdays,
-        weekend_days=weekend_days,
-        working_hours=working_hours,
-        work_start=work_start,
-        work_end=work_end,
-        tz=tz,
-    )
+    window = TimeWindow(days=days, work_start=work_start, work_end=work_end, tz=tz)
+    today = now_local.date()
+    for offset in range(days):
+        window.daily[today - timedelta(days=offset)] = DayCounts()
 
-    # Sent.
-    _accumulate(client, "sentitems", "sentDateTime", since_iso_z, tzinfo, work_start, work_end, result.sent)
+    _scan(client, "sentitems", "sentDateTime", since_iso_z, tzinfo, work_start, work_end, window, "sent")
 
-    # Received: Inbox root + descendants. Track 'filed' = anything that's not in root.
     inbox = folders_mod.walk_subtree(client, "inbox")
     for i, f in enumerate(folders_mod.flatten(inbox)):
         if f.total_item_count == 0:
             continue
-        target = Counts()
-        _accumulate(client, f.id, "receivedDateTime", since_iso_z, tzinfo, work_start, work_end, target)
-        result.received.total += target.total
-        result.received.weekday += target.weekday
-        result.received.weekend += target.weekend
-        result.received.working += target.working
+        _scan(client, f.id, "receivedDateTime", since_iso_z, tzinfo, work_start, work_end, window, "received")
         if i != 0:
-            result.filed.total += target.total
-            result.filed.weekday += target.weekday
-            result.filed.weekend += target.weekend
-            result.filed.working += target.working
+            _scan(client, f.id, "receivedDateTime", since_iso_z, tzinfo, work_start, work_end, window, "filed")
 
-    return result
+    return window

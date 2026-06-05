@@ -251,55 +251,72 @@ def recipients(top_n: int) -> None:
 @click.option("--work-end", type=int, default=17, show_default=True, help="Hour after the working day ends (1-24).")
 @click.option("--tz", default="America/Los_Angeles", show_default=True, help="IANA timezone for weekday/hour classification.")
 def rates(days: int, work_start: int, work_end: int, tz: str) -> None:
-    """Message rates over the last N days, by day-class and working hour."""
+    """Per-day timeline of sent / received / filed, with working-hour-normalized rates.
+
+    Each day shows absolute counts plus '/wh' columns — messages received or
+    sent during configured working hours, divided by hours-per-workday. Weekend
+    rows show '—' under the /wh columns since no working hours apply.
+    """
     with _client() as c, console.status(f"Counting messages in the last {days} days..."):
-        r = rates_mod.compute_rates(c, days=days, work_start=work_start, work_end=work_end, tz=tz)
-
-    def per_day(c: rates_mod.Counts) -> str:
-        return f"{c.total / r.days:.1f}" if r.days else "—"
-
-    def per_weekday(c: rates_mod.Counts) -> str:
-        return f"{c.weekday / r.weekdays:.1f}" if r.weekdays else "—"
-
-    def per_weekend_day(c: rates_mod.Counts) -> str:
-        return f"{c.weekend / r.weekend_days:.1f}" if r.weekend_days else "—"
-
-    def per_working_hour(c: rates_mod.Counts) -> str:
-        return f"{c.working / r.working_hours:.2f}" if r.working_hours else "—"
+        window = rates_mod.compute_daily_rates(
+            c, days=days, work_start=work_start, work_end=work_end, tz=tz
+        )
 
     console.print(
-        f"[bold]Rates over last {r.days} days[/]  "
-        f"[dim]({r.weekdays} weekdays, {r.weekend_days} weekend days, "
-        f"{r.working_hours} working hours of {r.work_start:02d}:00–{r.work_end:02d}:00 {r.tz})[/]"
+        f"[bold]Rates: last {days} days[/]  "
+        f"[dim]({window.weekdays} weekdays, working hours {work_start:02d}:00–{work_end:02d}:00 {tz})[/]"
     )
-    table = Table()
-    table.add_column("rate")
-    table.add_column("sent", justify="right")
-    table.add_column("received", justify="right")
-    table.add_column("filed", justify="right")
-    for label, fn in [
-        ("per day", per_day),
-        ("per weekday", per_weekday),
-        ("per weekend day", per_weekend_day),
-        ("per working hour", per_working_hour),
-    ]:
-        table.add_row(label, fn(r.sent), fn(r.received), fn(r.filed))
-    console.print(table)
 
-    # Also show absolute counts for transparency.
-    counts_table = Table(title=f"Raw counts in last {r.days} days")
-    counts_table.add_column("count")
-    counts_table.add_column("sent", justify="right")
-    counts_table.add_column("received", justify="right")
-    counts_table.add_column("filed", justify="right")
-    for label, attr in [("total", "total"), ("on weekdays", "weekday"), ("on weekends", "weekend"), ("in working hours", "working")]:
-        counts_table.add_row(
-            label,
-            f"{getattr(r.sent, attr):,}",
-            f"{getattr(r.received, attr):,}",
-            f"{getattr(r.filed, attr):,}",
+    table = Table()
+    table.add_column("date")
+    table.add_column("dow")
+    table.add_column("sent", justify="right")
+    table.add_column("recv", justify="right")
+    table.add_column("filed", justify="right")
+    table.add_column("sent/wh", justify="right")
+    table.add_column("recv/wh", justify="right")
+    table.add_column("filed/wh", justify="right")
+
+    hours_per_workday = window.hours_per_workday
+    for d in sorted(window.daily.keys(), reverse=True):
+        c = window.daily[d]
+        is_weekday = d.weekday() < 5
+        if is_weekday and hours_per_workday:
+            sent_rate = f"{c.sent_working / hours_per_workday:.2f}"
+            recv_rate = f"{c.received_working / hours_per_workday:.2f}"
+            filed_rate = f"{c.filed_working / hours_per_workday:.2f}"
+            dow_style = ""
+        else:
+            sent_rate = recv_rate = filed_rate = "—"
+            dow_style = "[dim]"
+        dow_name = d.strftime("%a")
+        table.add_row(
+            f"{dow_style}{d.isoformat()}",
+            f"{dow_style}{dow_name}",
+            f"{dow_style}{c.sent:,}",
+            f"{dow_style}{c.received:,}",
+            f"{dow_style}{c.filed:,}",
+            f"{dow_style}{sent_rate}",
+            f"{dow_style}{recv_rate}",
+            f"{dow_style}{filed_rate}",
         )
-    console.print(counts_table)
+
+    # Summary row across the window.
+    agg = window.aggregate()
+    total_wh = window.total_working_hours
+    if total_wh:
+        table.add_section()
+        table.add_row(
+            "[bold]window total[/]",
+            "",
+            f"[bold]{agg.sent:,}[/]",
+            f"[bold]{agg.received:,}[/]",
+            f"[bold]{agg.filed:,}[/]",
+            f"[bold]{agg.sent_working / total_wh:.2f}[/]",
+            f"[bold]{agg.received_working / total_wh:.2f}[/]",
+            f"[bold]{agg.filed_working / total_wh:.2f}[/]",
+        )
+    console.print(table)
 
 
 @main.command()
