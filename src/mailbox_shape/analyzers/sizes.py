@@ -30,19 +30,20 @@ def _percentiles(values: list[int]) -> dict[int, int]:
 def _collect_sizes(
     client: GraphClient,
     folder_id: str,
-    ts_field: str,
+    ts_field: str,  # kept for API compat; no longer used for $orderby
     limit: int | None,
 ) -> list[int]:
-    """Pull message sizes from a folder, newest first, capped at `limit`.
+    """Pull message sizes from a folder, capped at `limit`.
 
-    Uses an indexed $orderby on the timestamp field so Graph can stream pages
-    without scanning the full folder. Pass limit=None to fetch everything.
+    No $orderby — on some folders the sort interacts badly with the MAPI
+    expand and causes gateway timeouts. Order doesn't matter for percentile
+    estimation as long as the sample is large enough to converge.
     """
+    del ts_field  # accepted for symmetry with other analyzers; unused here
     sizes: list[int] = []
     params = {
         "$select": "id",
         "$expand": f"singleValueExtendedProperties($filter=id eq '{folders_mod.PR_MESSAGE_SIZE}')",
-        "$orderby": f"{ts_field} desc",
         "$top": PAGE_SIZE,
     }
     for msg in client.paged(f"/me/mailFolders/{folder_id}/messages", **params):

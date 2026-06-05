@@ -50,16 +50,29 @@ def main() -> None:
 @click.argument("folder", default="inbox")
 @click.option("--prop", default="Long 0x0E08", help="Extended property id to expand (default: PR_MESSAGE_SIZE_EXTENDED).")
 def raw_folder(folder: str, prop: str) -> None:
-    """Print the raw Graph JSON for a single folder with the size extended property expanded.
-
-    Use to debug why singleValueExtendedProperties might be returning empty.
-    Folder defaults to the well-known 'inbox' name.
-    """
+    """Print the raw Graph JSON for a single folder with the size extended property expanded."""
     params = {
         "$expand": f"singleValueExtendedProperties($filter=id eq '{prop}')",
     }
     with _client() as c:
         body = c.get(f"/me/mailFolders/{folder}", **params)
+    console.print_json(data=body)
+
+
+@main.command("raw-message")
+@click.argument("folder", default="inbox")
+@click.option("--no-expand", is_flag=True, help="Omit the singleValueExtendedProperties expand.")
+def raw_message(folder: str, no_expand: bool) -> None:
+    """Print the raw Graph JSON for the newest message in a folder.
+
+    Use to check whether 'size' is in the default response without $expand —
+    if so, $expand is unnecessary and slow folders can skip it.
+    """
+    params: dict = {"$top": 1, "$orderby": "receivedDateTime desc"}
+    if not no_expand:
+        params["$expand"] = "singleValueExtendedProperties($filter=id eq 'Integer 0x0E08')"
+    with _client() as c:
+        body = c.get(f"/me/mailFolders/{folder}/messages", **params)
     console.print_json(data=body)
 
 
