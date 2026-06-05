@@ -13,6 +13,7 @@ from .analyzers import attachments as attachments_mod
 from .analyzers import folders as folders_mod
 from .analyzers import message_types as types_mod
 from .analyzers import people as people_mod
+from .analyzers import rates as rates_mod
 from .analyzers import read_ratio as read_mod
 from .analyzers import sizes as sizes_mod
 from .analyzers import volume as volume_mod
@@ -242,6 +243,63 @@ def recipients(top_n: int) -> None:
     for addr, n in rows:
         table.add_row(addr, f"{n:,}")
     console.print(table)
+
+
+@main.command()
+@click.option("--days", type=int, default=30, show_default=True, help="Window size in days, ending today.")
+@click.option("--work-start", type=int, default=9, show_default=True, help="First hour of the working day (0-23).")
+@click.option("--work-end", type=int, default=17, show_default=True, help="Hour after the working day ends (1-24).")
+@click.option("--tz", default="America/Los_Angeles", show_default=True, help="IANA timezone for weekday/hour classification.")
+def rates(days: int, work_start: int, work_end: int, tz: str) -> None:
+    """Message rates over the last N days, by day-class and working hour."""
+    with _client() as c, console.status(f"Counting messages in the last {days} days..."):
+        r = rates_mod.compute_rates(c, days=days, work_start=work_start, work_end=work_end, tz=tz)
+
+    def per_day(c: rates_mod.Counts) -> str:
+        return f"{c.total / r.days:.1f}" if r.days else "—"
+
+    def per_weekday(c: rates_mod.Counts) -> str:
+        return f"{c.weekday / r.weekdays:.1f}" if r.weekdays else "—"
+
+    def per_weekend_day(c: rates_mod.Counts) -> str:
+        return f"{c.weekend / r.weekend_days:.1f}" if r.weekend_days else "—"
+
+    def per_working_hour(c: rates_mod.Counts) -> str:
+        return f"{c.working / r.working_hours:.2f}" if r.working_hours else "—"
+
+    console.print(
+        f"[bold]Rates over last {r.days} days[/]  "
+        f"[dim]({r.weekdays} weekdays, {r.weekend_days} weekend days, "
+        f"{r.working_hours} working hours of {r.work_start:02d}:00–{r.work_end:02d}:00 {r.tz})[/]"
+    )
+    table = Table()
+    table.add_column("rate")
+    table.add_column("sent", justify="right")
+    table.add_column("received", justify="right")
+    table.add_column("filed", justify="right")
+    for label, fn in [
+        ("per day", per_day),
+        ("per weekday", per_weekday),
+        ("per weekend day", per_weekend_day),
+        ("per working hour", per_working_hour),
+    ]:
+        table.add_row(label, fn(r.sent), fn(r.received), fn(r.filed))
+    console.print(table)
+
+    # Also show absolute counts for transparency.
+    counts_table = Table(title=f"Raw counts in last {r.days} days")
+    counts_table.add_column("count")
+    counts_table.add_column("sent", justify="right")
+    counts_table.add_column("received", justify="right")
+    counts_table.add_column("filed", justify="right")
+    for label, attr in [("total", "total"), ("on weekdays", "weekday"), ("on weekends", "weekend"), ("in working hours", "working")]:
+        counts_table.add_row(
+            label,
+            f"{getattr(r.sent, attr):,}",
+            f"{getattr(r.received, attr):,}",
+            f"{getattr(r.filed, attr):,}",
+        )
+    console.print(counts_table)
 
 
 @main.command()
