@@ -91,19 +91,31 @@ def whoami() -> None:
 
 
 @main.command()
-def folders() -> None:
-    """Print folder tree with item counts and sizes."""
+@click.option("--own", "show_own", is_flag=True, help="Show per-folder own values instead of recursive subtree rollups.")
+def folders(show_own: bool) -> None:
+    """Print folder tree with item counts and sizes.
+
+    Counts and sizes are recursive by default — each row reflects that folder
+    plus everything beneath it. Pass --own to show only the messages stored
+    directly in each folder.
+    """
     with _client() as c:
         tree = folders_mod.walk_folders(c)
+
+    scope = "own folder only" if show_own else "subtree rollup"
+    console.print(f"[bold]Folder tree[/]  [dim]({scope}; sizes from PR_MESSAGE_SIZE_EXTENDED)[/]")
 
     def render(nodes: list[folders_mod.FolderNode], depth: int = 0) -> None:
         for n in nodes:
             indent = "  " * depth
-            if n.size_in_bytes is None:
-                tail = f"{n.total_item_count} items"
+            if show_own:
+                count = n.total_item_count
+                size = n.size_in_bytes
             else:
-                tail = f"{n.total_item_count} items, {n.size_in_bytes / (1024 * 1024):,.1f} MB"
-            console.print(f"{indent}{n.display_name}  [dim]{tail}[/]")
+                count = n.tree_item_count
+                size = n.tree_size_in_bytes
+            mb = f"{size / (1024 * 1024):,.1f} MB" if size is not None else "—"
+            console.print(f"{indent}{n.display_name}  [dim]{count:,} items, {mb}[/]")
             render(n.children, depth + 1)
 
     render(tree)

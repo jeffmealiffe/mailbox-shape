@@ -19,10 +19,21 @@ class FolderNode:
     id: str
     display_name: str
     parent_id: str | None
+    # `total_item_count` and `size_in_bytes` are own-folder values — items
+    # directly in this folder, not in descendants. Use the `tree_*` properties
+    # below for the recursive rollup.
     total_item_count: int
     unread_item_count: int
     size_in_bytes: int | None
     children: list["FolderNode"] = field(default_factory=list)
+
+    @property
+    def tree_size_in_bytes(self) -> int:
+        return (self.size_in_bytes or 0) + sum(c.tree_size_in_bytes for c in self.children)
+
+    @property
+    def tree_item_count(self) -> int:
+        return self.total_item_count + sum(c.tree_item_count for c in self.children)
 
 
 def _normalize_prop_id(s: str) -> str:
