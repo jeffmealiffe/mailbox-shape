@@ -12,6 +12,7 @@ from rich.table import Table
 from .analyzers import folders as folders_mod
 from .analyzers import people as people_mod
 from .analyzers import read_ratio as read_mod
+from .analyzers import shape as shape_mod
 from .analyzers import sizes as sizes_mod
 from .analyzers import volume as volume_mod
 from .auth import get_access_token
@@ -180,6 +181,37 @@ def senders(top_n: int) -> None:
     table.add_column("count", justify="right")
     for addr, n in rows:
         table.add_row(addr, f"{n:,}")
+    console.print(table)
+
+
+@main.command()
+@click.option("--root", default="inbox", show_default=True,
+              help="Well-known folder to scope to. Use 'msgfolderroot' for the whole mailbox.")
+def shape(root: str) -> None:
+    """Per-folder attachment share and item-type breakdown.
+
+    The 'types' column shows non-default item types (meeting requests, etc.)
+    that mix in with plain messages. Folders that are 100% plain mail show '—'.
+    """
+    with _client() as c, console.status(f"Walking '{root}' subtree..."):
+        result = shape_mod.shape_by_folder(c, root)
+    rows = sorted(result.items(), key=lambda kv: kv[1].total, reverse=True)
+    table = Table(title=f"Item shape by folder ({root} + subfolders)")
+    table.add_column("folder")
+    table.add_column("total", justify="right")
+    table.add_column("w/ attach", justify="right")
+    table.add_column("% attach", justify="right")
+    table.add_column("non-message types")
+    for name, s in rows:
+        non_msg = [(t, n) for t, n in s.type_counts.most_common() if t != "message"]
+        type_str = ", ".join(f"{t}: {n:,}" for t, n in non_msg) or "—"
+        table.add_row(
+            name,
+            f"{s.total:,}",
+            f"{s.with_attachments:,}",
+            f"{s.attachment_pct:.0f}%",
+            type_str,
+        )
     console.print(table)
 
 
