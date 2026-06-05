@@ -171,17 +171,27 @@ def read_ratio(folder: str) -> None:
 @main.command()
 @click.option("--by", "bucket", type=click.Choice(["day", "week", "month"]), default="month")
 def volume(bucket: str) -> None:
-    """Print sent/received volume bucketed by day/week/month."""
-    with _client() as c:
-        sent = volume_mod.sent_volume(c, bucket)  # type: ignore[arg-type]
-        recv = volume_mod.received_volume(c, bucket)  # type: ignore[arg-type]
-    keys = sorted(set(sent) | set(recv))
+    """Print sent / received / filed volume bucketed by day/week/month.
+
+    'filed' is the subset of received messages that ended up in an Inbox
+    subfolder rather than staying in Inbox root — a proxy for how much of
+    your incoming mail got auto-sorted by rules.
+    """
+    with _client() as c, console.status("Counting messages across folders (this can take a while)..."):
+        result = volume_mod.volume_breakdown(c, bucket)  # type: ignore[arg-type]
+    keys = sorted(set(result["sent"]) | set(result["received"]))
     table = Table(title=f"Volume by {bucket}")
     table.add_column(bucket)
     table.add_column("sent", justify="right")
     table.add_column("received", justify="right")
+    table.add_column("filed", justify="right")
     for k in keys:
-        table.add_row(k, str(sent.get(k, 0)), str(recv.get(k, 0)))
+        table.add_row(
+            k,
+            str(result["sent"].get(k, 0)),
+            str(result["received"].get(k, 0)),
+            str(result["filed"].get(k, 0)),
+        )
     console.print(table)
 
 
