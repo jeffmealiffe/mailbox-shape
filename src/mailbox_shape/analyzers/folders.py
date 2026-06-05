@@ -25,9 +25,26 @@ class FolderNode:
     children: list["FolderNode"] = field(default_factory=list)
 
 
+def _normalize_prop_id(s: str) -> str:
+    """Normalize a Graph extended-property id for comparison.
+
+    Graph echoes ids back with lowercase type+hex and leading zeros stripped
+    (e.g. our 'Long 0x0E08' filter comes back as 'Long 0xe08' in the response).
+    """
+    parts = s.split(maxsplit=1)
+    if len(parts) != 2:
+        return s.lower()
+    typ, val = parts
+    if val.lower().startswith("0x"):
+        digits = val[2:].lstrip("0").lower() or "0"
+        val = "0x" + digits
+    return f"{typ.lower()} {val}"
+
+
 def _ext_value(item: dict, prop_id: str) -> int | None:
+    want = _normalize_prop_id(prop_id)
     for prop in item.get("singleValueExtendedProperties", []) or []:
-        if prop.get("id") == prop_id:
+        if _normalize_prop_id(prop.get("id", "")) == want:
             try:
                 return int(prop.get("value", 0))
             except (TypeError, ValueError):

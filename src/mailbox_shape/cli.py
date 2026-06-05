@@ -46,6 +46,23 @@ def main() -> None:
     """Analyze the shape of a Microsoft 365 mailbox."""
 
 
+@main.command("raw-folder")
+@click.argument("folder", default="inbox")
+@click.option("--prop", default="Long 0x0E08", help="Extended property id to expand (default: PR_MESSAGE_SIZE_EXTENDED).")
+def raw_folder(folder: str, prop: str) -> None:
+    """Print the raw Graph JSON for a single folder with the size extended property expanded.
+
+    Use to debug why singleValueExtendedProperties might be returning empty.
+    Folder defaults to the well-known 'inbox' name.
+    """
+    params = {
+        "$expand": f"singleValueExtendedProperties($filter=id eq '{prop}')",
+    }
+    with _client() as c:
+        body = c.get(f"/me/mailFolders/{folder}", **params)
+    console.print_json(data=body)
+
+
 @main.command()
 def whoami() -> None:
     """Print the account / tenant the cached token is bound to."""
