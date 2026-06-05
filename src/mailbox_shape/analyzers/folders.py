@@ -46,19 +46,37 @@ def walk_folders(client: GraphClient) -> list[FolderNode]:
     return fetch(None)
 
 
+# microsoft.graph.message has no schema-declared `size` — $select=size fails.
+# Read the MAPI property PR_MESSAGE_SIZE (tag 0x0E08, type Integer) instead.
+PR_MESSAGE_SIZE = "Integer 0x0E08"
+
+
+def _msg_size(msg: dict) -> int | None:
+    """Pull the PR_MESSAGE_SIZE value out of an expanded singleValueExtendedProperties."""
+    for prop in msg.get("singleValueExtendedProperties", []) or []:
+        if prop.get("id") == PR_MESSAGE_SIZE:
+            try:
+                return int(prop.get("value", 0))
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
 def compute_size(client: GraphClient, folder_id: str) -> int:
-    """Sum the `size` field of every message directly in this folder.
+    """Sum the size of every message directly in this folder.
 
     Does NOT include child folders — callers must recurse.
     """
     total = 0
-    for msg in client.paged(
-        f"/me/mailFolders/{folder_id}/messages",
-        **{"$select": "id,size", "$top": 999},
-    ):
-        size = msg.get("size")
-        if isinstance(size, int):
-            total += size
+    params = {
+        "$select": "id",
+        "$expand": f"singleValueExtendedProperties($filter=id eq '{PR_MESSAGE_SIZE}')",
+        "$top": 999,
+    }
+    for msg in client.paged(f"/me/mailFolders/{folder_id}/messages", **params):
+        s = _msg_size(msg)
+        if s is not None:
+            total += s
     return total
 
 
