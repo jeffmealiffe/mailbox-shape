@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import click
+from dotenv import load_dotenv
 from rich.console import Console
 from rich.table import Table
 
@@ -12,6 +13,7 @@ from .analyzers import volume as volume_mod
 from .auth import get_access_token
 from .graph import GraphClient
 
+load_dotenv()
 console = Console()
 
 
