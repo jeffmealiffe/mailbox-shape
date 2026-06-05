@@ -68,36 +68,56 @@ def _msg_size(msg: dict) -> int | None:
 
 
 _SELECT = "id,displayName,parentFolderId,totalItemCount,unreadItemCount"
+_COLLECTION_PARAMS = {
+    "$select": _SELECT,
+    "$expand": f"singleValueExtendedProperties($filter=id eq '{PR_MESSAGE_SIZE_EXTENDED}')",
+    "$top": 100,
+    "includeHiddenFolders": "true",
+}
+_ITEM_PARAMS = {
+    "$select": _SELECT,
+    "$expand": f"singleValueExtendedProperties($filter=id eq '{PR_MESSAGE_SIZE_EXTENDED}')",
+}
+
+
+def _build_node(client: GraphClient, item: dict) -> FolderNode:
+    return FolderNode(
+        id=item["id"],
+        display_name=item.get("displayName", ""),
+        parent_id=item.get("parentFolderId"),
+        total_item_count=item.get("totalItemCount", 0),
+        unread_item_count=item.get("unreadItemCount", 0),
+        size_in_bytes=_ext_value(item, PR_MESSAGE_SIZE_EXTENDED),
+        children=_fetch_children(client, item["id"]),
+    )
+
+
+def _fetch_children(client: GraphClient, parent_id: str) -> list[FolderNode]:
+    path = f"/me/mailFolders/{parent_id}/childFolders"
+    return [_build_node(client, item) for item in client.paged(path, **_COLLECTION_PARAMS)]
 
 
 def walk_folders(client: GraphClient) -> list[FolderNode]:
-    """Return top-level folders with children populated recursively.
+    """Return top-level folders with descendants populated recursively.
 
     Folder size comes from PR_MESSAGE_SIZE_EXTENDED, expanded inline — one
     extended property per folder, one round-trip per page (not per message).
     """
-    params = {
-        "$select": _SELECT,
-        "$expand": f"singleValueExtendedProperties($filter=id eq '{PR_MESSAGE_SIZE_EXTENDED}')",
-        "$top": 100,
-        "includeHiddenFolders": "true",
-    }
+    return [_build_node(client, item) for item in client.paged("/me/mailFolders", **_COLLECTION_PARAMS)]
 
-    def fetch(parent: str | None) -> list[FolderNode]:
-        path = "/me/mailFolders" if parent is None else f"/me/mailFolders/{parent}/childFolders"
-        nodes: list[FolderNode] = []
-        for item in client.paged(path, **params):
-            nodes.append(
-                FolderNode(
-                    id=item["id"],
-                    display_name=item.get("displayName", ""),
-                    parent_id=item.get("parentFolderId"),
-                    total_item_count=item.get("totalItemCount", 0),
-                    unread_item_count=item.get("unreadItemCount", 0),
-                    size_in_bytes=_ext_value(item, PR_MESSAGE_SIZE_EXTENDED),
-                    children=fetch(item["id"]),
-                )
-            )
-        return nodes
 
-    return fetch(None)
+def walk_subtree(client: GraphClient, root: str) -> FolderNode:
+    """Return one folder (by id or well-known name like 'inbox') with descendants.
+
+    Used to scope analyses to a specific subtree without walking the whole mailbox.
+    """
+    item = client.get(f"/me/mailFolders/{root}", **_ITEM_PARAMS)
+    return _build_node(client, item)
+
+
+def flatten(node: FolderNode) -> list[FolderNode]:
+    """Pre-order traversal: root, then descendants."""
+    out = [node]
+    for c in node.children:
+        out.extend(flatten(c))
+    return out

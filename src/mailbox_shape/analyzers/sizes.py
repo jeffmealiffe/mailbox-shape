@@ -54,17 +54,56 @@ def _collect_sizes(
     return sizes
 
 
+def _allocate_per_folder(
+    folders: list[folders_mod.FolderNode],
+    limit: int | None,
+) -> list[tuple[folders_mod.FolderNode, int | None]]:
+    """Split a sample budget across folders proportionally to item count.
+
+    When `limit` is None, each folder gets None (no cap). Folders with zero
+    items are dropped. Allocations are clamped to each folder's own item count
+    so we never ask for more than it holds.
+    """
+    active = [f for f in folders if f.total_item_count > 0]
+    if limit is None:
+        return [(f, None) for f in active]
+    total = sum(f.total_item_count for f in active)
+    if total == 0:
+        return []
+    out: list[tuple[folders_mod.FolderNode, int | None]] = []
+    for f in active:
+        share = f.total_item_count / total
+        cap = max(1, min(f.total_item_count, int(round(share * limit))))
+        out.append((f, cap))
+    return out
+
+
+def _collect_received_sizes(client: GraphClient, limit: int | None) -> list[int]:
+    """Sample message sizes from the entire Inbox subtree.
+
+    Walks Inbox + descendants, allocates the sample budget proportionally to
+    each folder's item count, and pulls newest-first from each.
+    """
+    inbox = folders_mod.walk_subtree(client, "inbox")
+    sizes: list[int] = []
+    for folder, cap in _allocate_per_folder(folders_mod.flatten(inbox), limit):
+        sizes.extend(_collect_sizes(client, folder.id, "receivedDateTime", cap))
+    return sizes
+
+
 def size_percentiles(
     client: GraphClient,
     limit: int | None = DEFAULT_SAMPLE,
 ) -> dict[str, dict[int, int]]:
     """Return {'sent': {p: bytes}, 'received': {p: bytes}}.
 
-    Samples the `limit` most recent messages from Sent Items and Inbox.
+    `sent` samples Sent Items. `received` samples Inbox + all subfolders,
+    proportionally to each folder's item count, so heavy newsletter/ads
+    subfolders don't get overweighted just because Inbox root is fetched first.
     """
     return {
         "sent": _percentiles(_collect_sizes(client, "sentitems", "sentDateTime", limit)),
-        "received": _percentiles(_collect_sizes(client, "inbox", "receivedDateTime", limit)),
+        "received": _percentiles(_collect_received_sizes(client, limit)),
     }
 
 
