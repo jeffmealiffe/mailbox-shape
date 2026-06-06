@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import base64
 import json
+from pathlib import Path
 
 import click
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.table import Table
 
+from . import report as report_mod
 from .analyzers import attachments as attachments_mod
 from .analyzers import folders as folders_mod
 from .analyzers import message_types as types_mod
@@ -243,6 +245,35 @@ def recipients(top_n: int) -> None:
     for addr, n in rows:
         table.add_row(addr, f"{n:,}")
     console.print(table)
+
+
+@main.command()
+@click.option("--output", "-o", type=click.Path(dir_okay=False), default="mailbox-report.html", show_default=True)
+@click.option("--days", type=int, default=30, show_default=True, help="Window for the rates section.")
+@click.option("--work-start", type=int, default=9, show_default=True)
+@click.option("--work-end", type=int, default=17, show_default=True)
+@click.option("--tz", default="America/Los_Angeles", show_default=True)
+@click.option("--quick", is_flag=True, help="Skip the slow Inbox-subtree analyzers (read-ratio, senders, attachments, types, monthly volume).")
+def report(output: str, days: int, work_start: int, work_end: int, tz: str, quick: bool) -> None:
+    """Generate a self-contained HTML report covering every analyzer.
+
+    Without --quick this runs a single fused walk over the Inbox subtree to
+    populate read-ratio + senders + attachments + types + monthly received
+    volume in one pass, so it's roughly as slow as a single 'volume' run
+    (5-15 minutes on a large mailbox), not the sum of all five.
+    """
+    out_path = Path(output).resolve()
+
+    def progress(label: str) -> None:
+        console.print(f"[dim]→[/] {label}")
+
+    with _client() as c:
+        data = report_mod.build_report(
+            c, days=days, work_start=work_start, work_end=work_end, tz=tz, quick=quick, progress=progress
+        )
+    progress("Rendering HTML...")
+    report_mod.write_report(data, out_path)
+    console.print(f"[bold green]✓[/] Wrote {out_path}")
 
 
 @main.command()

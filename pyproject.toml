@@ -18,6 +18,8 @@ dependencies = [
     "python-dateutil>=2.9",
     "python-dotenv>=1.0",
     "tzdata>=2024.1; platform_system == 'Windows'",
+    "jinja2>=3.1",
+    "matplotlib>=3.8",
 ]
 
 [project.optional-dependencies]
