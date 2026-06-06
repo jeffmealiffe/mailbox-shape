@@ -1,0 +1,7 @@
+# Every file in this repo is owned by the admin.
+# Combined with the 'main protection' ruleset requiring code-owner review,
+# this means non-admin PRs need explicit admin approval before merging.
+# Admins (in this case only @jeffmealiffe) can bypass the approval requirement
+# when merging their own PRs, but still must go through a PR — direct pushes
+# to main are blocked.
+* @jeffmealiffe
