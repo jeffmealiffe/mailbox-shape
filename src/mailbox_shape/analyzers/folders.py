@@ -1,4 +1,4 @@
-"""Folder shape: tree, item counts, sizes, attachment share, item-type breakdown."""
+"""Mailbox folder tree, item counts, and recursive subtree sizes."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
