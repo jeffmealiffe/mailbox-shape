@@ -46,7 +46,7 @@ def _collect_sizes(
         "$expand": f"singleValueExtendedProperties($filter=id eq '{folders_mod.PR_MESSAGE_SIZE}')",
         "$top": PAGE_SIZE,
     }
-    for msg in client.paged(f"/me/mailFolders/{folder_id}/messages", **params):
+    for msg in client.paged(f"{client.mailbox}/mailFolders/{folder_id}/messages", **params):
         s = folders_mod._msg_size(msg)
         if s is not None:
             sizes.append(s)

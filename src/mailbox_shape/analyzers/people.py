@@ -15,7 +15,7 @@ def top_senders(client: GraphClient, limit: int = 20) -> list[tuple[str, int]]:
     for f in folders_mod.flatten(inbox):
         if f.total_item_count == 0:
             continue
-        for msg in client.paged(f"/me/mailFolders/{f.id}/messages", **params):
+        for msg in client.paged(f"{client.mailbox}/mailFolders/{f.id}/messages", **params):
             addr = (msg.get("from") or {}).get("emailAddress", {}).get("address", "")
             if addr:
                 counts[addr.lower()] += 1
@@ -30,7 +30,7 @@ def top_recipients(client: GraphClient, limit: int = 20) -> list[tuple[str, int]
     """
     counts: Counter[str] = Counter()
     params = {"$select": "id,toRecipients,ccRecipients", "$top": 500}
-    for msg in client.paged("/me/mailFolders/sentitems/messages", **params):
+    for msg in client.paged(f"{client.mailbox}/mailFolders/sentitems/messages", **params):
         for r in (msg.get("toRecipients") or []) + (msg.get("ccRecipients") or []):
             addr = (r or {}).get("emailAddress", {}).get("address", "")
             if addr:

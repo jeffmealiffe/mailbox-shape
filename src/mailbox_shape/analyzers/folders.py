@@ -93,7 +93,7 @@ def _build_node(client: GraphClient, item: dict) -> FolderNode:
 
 
 def _fetch_children(client: GraphClient, parent_id: str) -> list[FolderNode]:
-    path = f"/me/mailFolders/{parent_id}/childFolders"
+    path = f"{client.mailbox}/mailFolders/{parent_id}/childFolders"
     return [_build_node(client, item) for item in client.paged(path, **_COLLECTION_PARAMS)]
 
 
@@ -103,7 +103,7 @@ def walk_folders(client: GraphClient) -> list[FolderNode]:
     Folder size comes from PR_MESSAGE_SIZE_EXTENDED, expanded inline — one
     extended property per folder, one round-trip per page (not per message).
     """
-    return [_build_node(client, item) for item in client.paged("/me/mailFolders", **_COLLECTION_PARAMS)]
+    return [_build_node(client, item) for item in client.paged(f"{client.mailbox}/mailFolders", **_COLLECTION_PARAMS)]
 
 
 def walk_subtree(client: GraphClient, root: str) -> FolderNode:
@@ -111,7 +111,7 @@ def walk_subtree(client: GraphClient, root: str) -> FolderNode:
 
     Used to scope analyses to a specific subtree without walking the whole mailbox.
     """
-    item = client.get(f"/me/mailFolders/{root}", **_ITEM_PARAMS)
+    item = client.get(f"{client.mailbox}/mailFolders/{root}", **_ITEM_PARAMS)
     return _build_node(client, item)
 
 

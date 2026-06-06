@@ -78,7 +78,7 @@ def _scan(
         "$top": 500,
         "$filter": f"{ts_field} ge {since_iso_z}",
     }
-    for msg in client.paged(f"/me/mailFolders/{folder_id}/messages", **params):
+    for msg in client.paged(f"{client.mailbox}/mailFolders/{folder_id}/messages", **params):
         raw = msg.get(ts_field)
         if not raw:
             continue

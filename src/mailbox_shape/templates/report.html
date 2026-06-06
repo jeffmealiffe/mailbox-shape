@@ -108,6 +108,8 @@
   <div class="meta">
     Generated {{ data.generated_at.strftime('%Y-%m-%d %H:%M') }}
     &nbsp;·&nbsp;
+    Mailbox: <code style="background:rgba(255,255,255,0.15); padding:1px 6px; border-radius:3px;">{{ data.mailbox }}</code>
+    &nbsp;·&nbsp;
     Total messages: {{ total_items | intcomma }}
     &nbsp;·&nbsp;
     Total size: {{ total_size | humanbytes }}

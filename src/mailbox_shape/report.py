@@ -56,7 +56,7 @@ def _fused_inbox_walk(client: GraphClient) -> _FusedAccum:
             continue
         att = attachments_mod.AttachmentStats(total=0, with_attachments=0)
         type_counts: Counter[str] = Counter()
-        for msg in client.paged(f"/me/mailFolders/{f.id}/messages", **params):
+        for msg in client.paged(f"{client.mailbox}/mailFolders/{f.id}/messages", **params):
             # read ratio + senders
             sender = (msg.get("from") or {}).get("emailAddress", {}).get("address", "")
             if sender:
@@ -88,7 +88,7 @@ def _fused_inbox_walk(client: GraphClient) -> _FusedAccum:
 def _sent_volume_by_month(client: GraphClient) -> Counter[str]:
     counts: Counter[str] = Counter()
     params = {"$select": "id,sentDateTime", "$top": 500}
-    for msg in client.paged("/me/mailFolders/sentitems/messages", **params):
+    for msg in client.paged(f"{client.mailbox}/mailFolders/sentitems/messages", **params):
         raw = msg.get("sentDateTime")
         if raw:
             counts[volume_mod._bucket_key(dateparser.isoparse(raw), "month")] += 1
@@ -112,7 +112,7 @@ def build_report(
         if progress is not None:
             progress(label)
 
-    data: dict = {"generated_at": datetime.now()}
+    data: dict = {"generated_at": datetime.now(), "mailbox": client.mailbox}
 
     step("Walking folder tree...")
     data["folders"] = folders_mod.walk_folders(client)

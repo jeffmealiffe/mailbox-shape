@@ -32,7 +32,7 @@ def attachments_by_folder(client: GraphClient, root: str = "inbox") -> dict[str,
             continue
         total = 0
         with_att = 0
-        for msg in client.paged(f"/me/mailFolders/{f.id}/messages", **params):
+        for msg in client.paged(f"{client.mailbox}/mailFolders/{f.id}/messages", **params):
             total += 1
             if msg.get("hasAttachments"):
                 with_att += 1

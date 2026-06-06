@@ -26,7 +26,7 @@ def message_types_by_folder(client: GraphClient, root: str = "inbox") -> dict[st
         if f.total_item_count == 0:
             continue
         counts: Counter[str] = Counter()
-        for msg in client.paged(f"/me/mailFolders/{f.id}/messages", **params):
+        for msg in client.paged(f"{client.mailbox}/mailFolders/{f.id}/messages", **params):
             raw_type = msg.get("@odata.type", "#microsoft.graph.message")
             counts[raw_type.removeprefix("#microsoft.graph.")] += 1
         out[f.display_name] = counts

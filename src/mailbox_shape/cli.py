@@ -32,7 +32,10 @@ MSA_TENANT_ID = "9188040d-6c67-4c5b-b112-36a304b66dad"
 
 
 def _client() -> GraphClient:
-    return GraphClient(get_access_token())
+    """Build a GraphClient from current Click context — respects --mailbox."""
+    ctx = click.get_current_context(silent=True)
+    mailbox: str | None = ctx.obj.get("mailbox") if ctx and ctx.obj else None
+    return GraphClient(get_access_token(shared=bool(mailbox)), mailbox=mailbox)
 
 
 def _decode_token_claims(token: str) -> dict:
@@ -48,8 +51,23 @@ def _decode_token_claims(token: str) -> dict:
 
 
 @click.group()
-def main() -> None:
+@click.option(
+    "--mailbox",
+    "mailbox",
+    default=None,
+    metavar="UPN_OR_ID",
+    help=(
+        "Target another user's mailbox (UPN or user id). Defaults to the "
+        "authenticated user's own mailbox. Requires Mail.Read.Shared (or "
+        "Mail.Read.All) in the app registration and that the authenticated "
+        "user has delegated access to the target mailbox."
+    ),
+)
+@click.pass_context
+def main(ctx: click.Context, mailbox: str | None) -> None:
     """Analyze the shape of a Microsoft 365 mailbox."""
+    ctx.ensure_object(dict)
+    ctx.obj["mailbox"] = mailbox
 
 
 @main.command("raw-folder")
@@ -61,7 +79,7 @@ def raw_folder(folder: str, prop: str) -> None:
         "$expand": f"singleValueExtendedProperties($filter=id eq '{prop}')",
     }
     with _client() as c:
-        body = c.get(f"/me/mailFolders/{folder}", **params)
+        body = c.get(f"{c.mailbox}/mailFolders/{folder}", **params)
     console.print_json(data=body)
 
 
@@ -78,7 +96,7 @@ def raw_message(folder: str, no_expand: bool) -> None:
     if not no_expand:
         params["$expand"] = "singleValueExtendedProperties($filter=id eq 'Integer 0x0E08')"
     with _client() as c:
-        body = c.get(f"/me/mailFolders/{folder}/messages", **params)
+        body = c.get(f"{c.mailbox}/mailFolders/{folder}/messages", **params)
     console.print_json(data=body)
 
 
@@ -90,6 +108,9 @@ def whoami() -> None:
     tid = claims.get("tid", "?")
     account_kind = "personal Microsoft account (consumer)" if tid == MSA_TENANT_ID else "work/school (Entra ID)"
 
+    ctx = click.get_current_context(silent=True)
+    target_mailbox = ctx.obj.get("mailbox") if ctx and ctx.obj else None
+
     table = Table(title="Cached token identity")
     table.add_column("field")
     table.add_column("value")
@@ -98,6 +119,7 @@ def whoami() -> None:
     table.add_row("upn claim", claims.get("upn", claims.get("preferred_username", "(none)")))
     table.add_row("name claim", claims.get("name", "(none)"))
     table.add_row("scopes (scp claim)", claims.get("scp", "(none)"))
+    table.add_row("target mailbox", target_mailbox or "(authenticated user)")
 
     with GraphClient(token) as c:
         try:

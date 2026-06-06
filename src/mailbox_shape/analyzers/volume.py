@@ -25,7 +25,7 @@ def _bucket_key(ts: datetime, bucket: Bucket) -> str:
 def _count(client: GraphClient, folder_id: str, ts_field: str, bucket: Bucket) -> Counter[str]:
     counts: Counter[str] = Counter()
     params = {"$select": f"id,{ts_field}", "$top": 500}
-    for msg in client.paged(f"/me/mailFolders/{folder_id}/messages", **params):
+    for msg in client.paged(f"{client.mailbox}/mailFolders/{folder_id}/messages", **params):
         raw = msg.get(ts_field)
         if not raw:
             continue

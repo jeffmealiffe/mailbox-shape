@@ -33,7 +33,7 @@ def read_ratio_by_sender_domain(client: GraphClient) -> dict[str, ReadStats]:
     for f in folders_mod.flatten(inbox):
         if f.total_item_count == 0:
             continue
-        for msg in client.paged(f"/me/mailFolders/{f.id}/messages", **params):
+        for msg in client.paged(f"{client.mailbox}/mailFolders/{f.id}/messages", **params):
             sender = (msg.get("from") or {}).get("emailAddress", {}).get("address", "")
             domain = sender.split("@", 1)[1].lower() if "@" in sender else "(unknown)"
             totals[domain] += 1

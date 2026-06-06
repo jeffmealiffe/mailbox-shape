@@ -34,13 +34,22 @@ def _raise(r: httpx.Response) -> None:
 
 
 class GraphClient:
-    def __init__(self, token: str, timeout: float = 60.0, retries: int = 3) -> None:
+    def __init__(
+        self,
+        token: str,
+        mailbox: str | None = None,
+        timeout: float = 60.0,
+        retries: int = 3,
+    ) -> None:
+        """`mailbox` is a UPN or user-id to target someone else's mailbox via
+        /users/{id-or-upn}/... ; None (default) targets /me."""
         self._client = httpx.Client(
             base_url=GRAPH,
             headers={"Authorization": f"Bearer {token}"},
             timeout=timeout,
         )
         self._retries = retries
+        self.mailbox = "/me" if mailbox is None else f"/users/{mailbox}"
 
     def close(self) -> None:
         self._client.close()

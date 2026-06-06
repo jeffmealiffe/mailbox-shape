@@ -11,7 +11,7 @@ Analyze the shape of a Microsoft 365 mailbox via the Microsoft Graph API.
 
 ## Auth
 
-Uses MSAL device-code flow against a public-client Azure AD app registration. You'll need to register an application in your tenant (or use a multi-tenant app) and grant delegated `Mail.Read` (and `Mail.ReadBasic` for lighter scans). Set:
+Uses MSAL device-code flow against a public-client Azure AD app registration. You'll need to register an application in your tenant (or use a multi-tenant app) and grant delegated `Mail.Read`. To target another user's mailbox via `--mailbox`, also grant delegated `Mail.Read.Shared`. Set:
 
 ```
 MAILBOX_SHAPE_CLIENT_ID=<your app client id>
@@ -31,11 +31,16 @@ pip install -e .
 ## Usage
 
 ```powershell
-mailbox-shape folders          # folder tree + sizes
-mailbox-shape sizes            # message size percentiles
-mailbox-shape read-ratio       # read vs. ignored
-mailbox-shape volume --by week # volume buckets
-mailbox-shape all              # everything, written to ./report/
+mailbox-shape folders                 # folder tree + sizes
+mailbox-shape sizes                   # message size percentiles
+mailbox-shape read-ratio              # read vs. ignored
+mailbox-shape volume --by week        # volume buckets
+mailbox-shape rates --days 30         # last-N-days timeline
+mailbox-shape report -o report.html   # full HTML report
+
+# Target another user's mailbox (requires Mail.Read.Shared + delegated access):
+mailbox-shape --mailbox user@example.com folders
+mailbox-shape --mailbox user@example.com report -o user-report.html
 ```
 
 ## Status
