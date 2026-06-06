@@ -33,3 +33,6 @@ Thumbs.db
 token_cache.bin
 report/
 *.local.json
+# Generated reports — contain real mailbox data
+mailbox-report.html
+*-report.html
