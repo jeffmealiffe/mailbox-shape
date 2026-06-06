@@ -33,18 +33,14 @@ Requires Python 3.11+. On Windows, the `tzdata` PyPI package is pulled automatic
 
 ## App registration
 
-You need a public-client Azure AD (Entra) app registration with at least delegated `Mail.Read` granted. To target other users' mailboxes via `--mailbox`, also add delegated `Mail.Read.Shared`.
+You need a public-client Microsoft Entra (Azure AD) app registration with delegated `Mail.Read` granted. The quick version:
 
-Steps (Azure Portal → **Microsoft Entra ID** → **App registrations** → **New registration**):
+1. https://entra.microsoft.com → **Applications** → **App registrations** → **+ New registration** → name it, leave Redirect URI blank, **Register**.
+2. **Authentication** → flip **Allow public client flows** to **Yes**, **Save**.
+3. **API permissions** → **+ Add a permission** → **Microsoft Graph** → **Delegated permissions** → add **`Mail.Read`** (and **`Mail.Read.Shared`** if you'll use `--mailbox`).
+4. Copy the **Application (client) ID** from the **Overview** page.
 
-1. **Name**: `mailbox-shape` (anything works).
-2. **Supported account types**: choose what fits your tenant. Multi-tenant + personal Microsoft accounts is the broadest option.
-3. **Redirect URI**: leave blank — device-code flow doesn't use one.
-4. After creation, go to **Authentication** → **Advanced settings** → flip **Allow public client flows** to **Yes**, save.
-5. Go to **API permissions** → **Add a permission** → **Microsoft Graph** → **Delegated permissions**:
-   - `Mail.Read` (required)
-   - `Mail.Read.Shared` (optional, only if you'll use `--mailbox`)
-6. Copy the **Application (client) ID** from the **Overview** page.
+**Full walkthrough with troubleshooting:** [docs/app-registration.md](docs/app-registration.md) — covers account-type choices, the consent flow, adding `Mail.Read.Shared` after the fact, and the common `AADSTS*` errors and what they mean.
 
 ## Configuration
 
